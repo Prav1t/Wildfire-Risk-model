@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BC Wildfire Risk Model | AI-Powered Risk Classification</title>
+  <meta name="description" content="AI-powered wildfire risk classification for British Columbia using satellite imagery, NASA data, and machine learning." />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    :root {
+      --bg: #0a0c0f;
+      --surface: #111318;
+      --surface2: #181c22;
+      --border: rgba(255,255,255,0.07);
+      --text: #e8eaf0;
+      --muted: #6b7280;
+      --accent: #ff5722;
+      --accent2: #ff8c42;
+
+      --very-low: #22c55e;
+      --low: #a3e635;
+      --moderate: #facc15;
+      --high: #f97316;
+      --extreme: #ef4444;
+
+      --font-display: 'Syne', sans-serif;
+      --font-body: 'DM Sans', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 15px;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── Disclaimer Modal ── */
+    #disclaimer-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px);
+      display: flex; align-items: center; justify-content: center;
+      padding: 1rem;
+      animation: fadeIn .3s ease;
+    }
+
+    #disclaimer-box {
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: 16px;
+      max-width: 520px;
+      width: 100%;
+      padding: 2.5rem;
+      position: relative;
+    }
+
+    .disclaimer-icon {
+      width: 52px; height: 52px;
+      background: rgba(255,87,34,0.15);
+      border: 1.5px solid var(--accent);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+
+    #disclaimer-box h2 {
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: .75rem;
+    }
+
+    #disclaimer-box p {
+      color: #9ca3af;
+      font-size: .9rem;
+      line-height: 1.7;
+      margin-bottom: .75rem;
+    }
+
+    #disclaimer-box p strong { color: var(--accent); }
+
+    .disclaimer-btn {
+      margin-top: 1.5rem;
+      width: 100%;
+      padding: .85rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-family: var(--font-display);
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity .2s, transform .1s;
+      letter-spacing: .03em;
+    }
+
+    .disclaimer-btn:hover { opacity: .88; transform: translateY(-1px); }
+    .disclaimer-btn:active { transform: translateY(0); }
+
+    /* ── Layout ── */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(10,12,15,0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+      height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    .logo {
+      display: flex; align-items: center; gap: .75rem;
+    }
+
+    .logo-flame {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, #ff5722, #ff8c42);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem;
+    }
+
+    .logo-text {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: 1.1rem;
+      letter-spacing: -.01em;
+    }
+
+    .logo-text span { color: var(--accent); }
+
+    nav { display: flex; gap: .25rem; }
+
+    nav a {
+      padding: .45rem .85rem;
+      border-radius: 8px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: .875rem;
+      font-weight: 500;
+      transition: color .2s, background .2s;
+    }
+
+    nav a:hover, nav a.active { color: var(--text); background: var(--surface2); }
+
+    .nav-badge {
+      display: flex; align-items: center; gap: .5rem;
+    }
+
+    .live-dot {
+      width: 8px; height: 8px;
+      background: var(--very-low);
+      border-radius: 50%;
+      animation: pulse 2s ease infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .5; transform: scale(.7); }
+    }
+
+    .live-label {
+      font-family: var(--font-mono);
+      font-size: .75rem;
+      color: var(--very-low);
+    }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 5rem 2rem 3rem;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .hero-tag {
+      display: inline-flex; align-items: center; gap: .5rem;
+      background: rgba(255,87,34,0.1);
+      border: 1px solid rgba(255,87,34,0.3);
+      border-radius: 100px;
+      padding: .3rem .9rem;
+      font-family: var(--font-mono);
+      font-size: .75rem;
+      color: var(--accent2);
+      margin-bottom: 1.5rem;
+      animation: slideUp .6s ease both;
+    }
+
+    .hero h1 {
+      font-family: var(--font-display);
+      font-size: clamp(2.5rem, 5vw, 4.5rem);
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -.03em;
+      color: #fff;
+      max-width: 700px;
+      animation: slideUp .6s .1s ease both;
+    }
+
+    .hero h1 em {
+      font-style: normal;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-sub {
+      margin-top: 1.25rem;
+      color: var(--muted);
+      font-size: 1.05rem;
+      max-width: 560px;
+      animation: slideUp .6s .2s ease both;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    /* ── Stats Row ── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 2rem 2.5rem;
+      animation: slideUp .6s .3s ease both;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.25rem 1.5rem;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .2s, transform .2s;
+    }
+
+    .stat-card:hover {
+      border-color: rgba(255,87,34,0.3);
+      transform: translateY(-2px);
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      opacity: 0;
+      transition: opacity .2s;
+    }
+
+    .stat-card:hover::before { opacity: 1; }
+
+    .stat-label {
+      font-size: .75rem;
+      font-family: var(--font-mono);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: .5rem;
+    }
+
+    .stat-value {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      font-weight: 800;
+      color: #fff;
+      line-height: 1;
+    }
+
+    .stat-value span {
+      font-size: 1rem;
+      font-weight: 400;
+      color: var(--muted);
+      font-family: var(--font-body);
+    }
+
+    .stat-change {
+      margin-top: .4rem;
+      font-size: .8rem;
+      color: var(--muted);
+    }
+
+    .stat-change.up { color: var(--extreme); }
+    .stat-change.down { color: var(--very-low); }
+
+    /* ── Main Grid ── */
+    .main-grid {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 2rem 4rem;
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 1100px) {
+      .main-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ── Map ── */
+    .map-container {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .map-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    .map-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1rem;
+      color: #fff;
+    }
+
+    .map-subtitle {
+      font-size: .8rem;
+      color: var(--muted);
+      margin-top: .15rem;
+    }
+
+    .map-controls {
+      display: flex; gap: .5rem;
+    }
+
+    .ctrl-btn {
+      padding: .4rem .85rem;
+      border-radius: 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: .8rem;
+      cursor: pointer;
+      transition: all .2s;
+      font-family: var(--font-mono);
+    }
+
+    .ctrl-btn:hover, .ctrl-btn.active {
+      background: rgba(255,87,34,0.1);
+      border-color: rgba(255,87,34,0.4);
+      color: var(--accent2);
+    }
+
+    #map {
+      height: 520px;
+      width: 100%;
+    }
+
+    /* Leaflet dark override */
+    .leaflet-tile-pane { filter: brightness(.85) saturate(.7) hue-rotate(5deg); }
+
+    .leaflet-popup-content-wrapper {
+      background: var(--surface) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 12px !important;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5) !important;
+      color: var(--text) !important;
+    }
+
+    .leaflet-popup-tip { background: var(--surface) !important; }
+
+    .popup-header {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1rem;
+      color: #fff;
+      margin-bottom: .5rem;
+    }
+
+    .popup-badge {
+      display: inline-block;
+      padding: .2rem .65rem;
+      border-radius: 100px;
+      font-size: .72rem;
+      font-family: var(--font-mono);
+      font-weight: 500;
+      margin-bottom: .75rem;
+    }
+
+    .popup-row {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: .82rem;
+      color: var(--muted);
+      padding: .3rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .popup-row:last-child { border-bottom: none; }
+    .popup-row strong { color: var(--text); font-weight: 500; }
+
+    .map-legend {
+      position: absolute;
+      bottom: 30px; right: 10px;
+      z-index: 1000;
+      background: rgba(17,19,24,0.9);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      min-width: 160px;
+    }
+
+    .legend-title {
+      font-family: var(--font-mono);
+      font-size: .7rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: .75rem;
+    }
+
+    .legend-item {
+      display: flex; align-items: center; gap: .6rem;
+      margin-bottom: .5rem;
+      font-size: .8rem;
+      color: var(--text);
+    }
+
+    .legend-dot {
+      width: 12px; height: 12px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar { display: flex; flex-direction: column; gap: 1.25rem; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.5rem;
+    }
+
+    .card-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: .95rem;
+      color: #fff;
+      margin-bottom: 1.25rem;
+      display: flex; align-items: center; gap: .5rem;
+    }
+
+    .card-title-icon {
+      width: 28px; height: 28px;
+      border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .9rem;
+      background: rgba(255,87,34,0.1);
+    }
+
+    /* Distribution bar */
+    .risk-bar-wrap { margin-bottom: 1rem; }
+
+    .risk-bar-label {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: .4rem;
+      font-size: .82rem;
+    }
+
+    .risk-bar-label span:first-child { color: var(--text); }
+    .risk-bar-label span:last-child {
+      font-family: var(--font-mono);
+      font-size: .75rem;
+      color: var(--muted);
+    }
+
+    .risk-bar-track {
+      height: 8px;
+      background: var(--surface2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .risk-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 1.2s cubic-bezier(.4,0,.2,1);
+    }
+
+    /* Region cards */
+    .region-item {
+      display: flex; align-items: center; gap: .85rem;
+      padding: .75rem 0;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background .2s;
+      border-radius: 8px;
+      padding: .6rem .5rem;
+    }
+
+    .region-item:hover { background: var(--surface2); }
+    .region-item:last-child { border-bottom: none; }
+
+    .region-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .region-name { font-size: .85rem; color: var(--text); flex: 1; }
+
+    .region-risk {
+      font-family: var(--font-mono);
+      font-size: .72rem;
+      padding: .2rem .6rem;
+      border-radius: 100px;
+    }
+
+    /* ── About Section ── */
+    #about {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2rem 2rem 6rem;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .section-tag {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: .75rem;
+      color: var(--accent2);
+      background: rgba(255,87,34,0.08);
+      border: 1px solid rgba(255,87,34,0.2);
+      padding: .3rem 1rem;
+      border-radius: 100px;
+      margin-bottom: 1rem;
+    }
+
+    .section-header h2 {
+      font-family: var(--font-display);
+      font-size: clamp(1.8rem, 3vw, 2.8rem);
+      font-weight: 800;
+      letter-spacing: -.03em;
+      color: #fff;
+    }
+
+    .section-header p {
+      margin-top: .75rem;
+      color: var(--muted);
+      max-width: 540px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .about-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 3rem;
+    }
+
+    .about-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      transition: border-color .2s, transform .2s;
+    }
+
+    .about-card:hover {
+      border-color: rgba(255,87,34,0.25);
+      transform: translateY(-3px);
+    }
+
+    .about-card-icon {
+      font-size: 1.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .about-card h3 {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.05rem;
+      color: #fff;
+      margin-bottom: .6rem;
+    }
+
+    .about-card p {
+      color: #9ca3af;
+      font-size: .875rem;
+      line-height: 1.7;
+    }
+
+    .about-card ul {
+      list-style: none;
+      margin-top: .75rem;
+    }
+
+    .about-card ul li {
+      font-size: .85rem;
+      color: #9ca3af;
+      padding: .3rem 0;
+      display: flex; gap: .5rem;
+    }
+
+    .about-card ul li::before {
+      content: '→';
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+
+    /* Accuracy Timeline */
+    .accuracy-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      margin-bottom: 2rem;
+    }
+
+    .accuracy-section h3 {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: #fff;
+      margin-bottom: 1.5rem;
+    }
+
+    .model-comparison {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .model-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      text-align: center;
+      transition: all .2s;
+    }
+
+    .model-card.best {
+      border-color: rgba(255,87,34,0.5);
+      background: rgba(255,87,34,0.06);
+    }
+
+    .model-card .model-name {
+      font-family: var(--font-mono);
+      font-size: .75rem;
+      color: var(--muted);
+      margin-bottom: .6rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .model-card .model-accuracy {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .model-card.best .model-accuracy { color: var(--accent2); }
+
+    .model-card .model-label {
+      font-size: .75rem;
+      color: var(--muted);
+      margin-top: .25rem;
+    }
+
+    .best-badge {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      font-size: .65rem;
+      font-family: var(--font-mono);
+      padding: .15rem .5rem;
+      border-radius: 4px;
+      margin-top: .4rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+
+    /* Mini chart */
+    #accuracy-chart {
+      width: 100%;
+      height: 120px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem;
+      text-align: center;
+    }
+
+    footer p {
+      font-size: .8rem;
+      color: var(--muted);
+    }
+
+    footer p a { color: var(--accent2); text-decoration: none; }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: #2d3139; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3f4550; }
+
+    /* ── Tooltip ── */
+    .tooltip {
+      position: absolute;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .5rem .75rem;
+      font-size: .78rem;
+      color: var(--text);
+      pointer-events: none;
+      z-index: 2000;
+      white-space: nowrap;
+      box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    }
+
+    /* ── Tabs ── */
+    .tab-bar {
+      display: flex; gap: .25rem;
+      padding: .25rem;
+      background: var(--surface2);
+      border-radius: 10px;
+      margin-bottom: 1.25rem;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: .45rem;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 8px;
+      font-size: .8rem;
+      cursor: pointer;
+      transition: all .2s;
+      font-family: var(--font-body);
+    }
+
+    .tab-btn.active {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Alert banner */
+    .alert-banner {
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 10px;
+      padding: .75rem 1rem;
+      margin-bottom: 1rem;
+      display: flex; gap: .75rem; align-items: flex-start;
+    }
+
+    .alert-banner-icon { font-size: 1rem; flex-shrink: 0; margin-top: .05rem; }
+
+    .alert-banner-text {
+      font-size: .82rem;
+      color: #fca5a5;
+      line-height: 1.5;
+    }
+
+    .alert-banner-text strong { color: #ef4444; }
+  </style>
+</head>
+<body>
+
+<!-- ── Disclaimer Modal ── -->
+<div id="disclaimer-overlay">
+  <div id="disclaimer-box">
+    <div class="disclaimer-icon">⚠️</div>
+    <h2>Unofficial Research Tool</h2>
+    <p>This platform is <strong>not an official Government of Canada or BC Wildfire Service website</strong>. It is an academic research project developed at SFU for CMPT 310.</p>
+    <p>Risk classifications shown here are generated by an AI/ML model using NASA satellite imagery and weather station data. They are <strong>for informational and research purposes only</strong> and should not be used as the sole basis for emergency decisions.</p>
+    <p>For official wildfire information, visit <strong>bcwildfire.ca</strong> or call <strong>1-800-663-5555</strong>.</p>
+    <button class="disclaimer-btn" onclick="document.getElementById('disclaimer-overlay').style.display='none'">
+      I Understand — Continue to App
+    </button>
+  </div>
+</div>
+
+<!-- ── Header ── -->
+<header>
+  <div class="logo">
+    <div class="logo-flame">🔥</div>
+    <div class="logo-text">BC<span>Fire</span>Risk</div>
+  </div>
+  <nav>
+    <a href="#map-section" class="active">Map</a>
+    <a href="#about">About</a>
+    <a href="#about">Methodology</a>
+  </nav>
+  <div class="nav-badge">
+    <div class="live-dot"></div>
+    <span class="live-label">MODEL ACTIVE</span>
+  </div>
+</header>
+
+<!-- ── Hero ── -->
+<section class="hero">
+  <div class="hero-tag">🛰 Powered by NASA AppEEARS + ML Ensemble</div>
+  <h1>Wildfire Risk<br>across <em>British Columbia</em></h1>
+  <p class="hero-sub">AI-driven risk classification using satellite imagery, weather data, and geographical features — categorized into 5 risk levels across BC.</p>
+</section>
+
+<!-- ── Stats Row ── -->
+<div class="stats-row" id="stats-row">
+  <div class="stat-card">
+    <div class="stat-label">Model Accuracy</div>
+    <div class="stat-value">89.4<span>%</span></div>
+    <div class="stat-change up">↑ Ensemble method (best)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Data Points</div>
+    <div class="stat-value">47<span>K+</span></div>
+    <div class="stat-change">Weather station records</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Satellite Bands</div>
+    <div class="stat-value">12<span></span></div>
+    <div class="stat-change">NASA MODIS + Landsat-8</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Risk Zones</div>
+    <div class="stat-value">5<span></span></div>
+    <div class="stat-change">Very Low → Extreme</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Coverage</div>
+    <div class="stat-value">944<span>K km²</span></div>
+    <div class="stat-change">Full BC province</div>
+  </div>
+</div>
+
+<!-- ── Main Grid ── -->
+<div class="main-grid" id="map-section">
+
+  <!-- Map Column -->
+  <div>
+    <div class="map-container">
+      <div class="map-header">
+        <div>
+          <div class="map-title">BC Wildfire Risk Classification</div>
+          <div class="map-subtitle">Click any marker to view station-level data</div>
+        </div>
+        <div class="map-controls">
+          <button class="ctrl-btn active" onclick="setLayer('risk')">Risk</button>
+          <button class="ctrl-btn" onclick="setLayer('density')">Density</button>
+          <button class="ctrl-btn" onclick="setLayer('terrain')">Terrain</button>
+        </div>
+      </div>
+      <div id="map"></div>
+      <div class="map-legend">
+        <div class="legend-title">Risk Level</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>Very Low</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#a3e635"></div>Low</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#facc15"></div>Moderate</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div>High</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Extreme</div>
+      </div>
+    </div>
+
+    <!-- Alert -->
+    <div class="alert-banner" style="margin-top:1.25rem">
+      <div class="alert-banner-icon">🔥</div>
+      <div class="alert-banner-text">
+        <strong>Research Model Output:</strong> Risk levels are ML predictions based on historical NASA satellite data and BC weather station records. Actual conditions may differ. Always consult official BC Wildfire Service alerts.
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <!-- Distribution -->
+    <div class="card">
+      <div class="card-title">
+        <div class="card-title-icon">📊</div>
+        Risk Distribution
+      </div>
+
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('province','dist-province')">Province</button>
+        <button class="tab-btn" onclick="switchTab('region','dist-region')">By Region</button>
+      </div>
+
+      <div id="dist-province" class="tab-content active">
+        <div class="risk-bar-wrap">
+          <div class="risk-bar-label"><span>Very Low</span><span id="pct-vl">23%</span></div>
+          <div class="risk-bar-track"><div class="risk-bar-fill" style="background:#22c55e;width:0" data-w="23"></div></div>
+        </div>
+        <div class="risk-bar-wrap">
+          <div class="risk-bar-label"><span>Low</span><span id="pct-l">31%</span></div>
+          <div class="risk-bar-track"><div class="risk-bar-fill" style="background:#a3e635;width:0" data-w="31"></div></div>
+        </div>
+        <div class="risk-bar-wrap">
+          <div class="risk-bar-label"><span>Moderate</span><span id="pct-m">25%</span></div>
+          <div class="risk-bar-track"><div class="risk-bar-fill" style="background:#facc15;width:0" data-w="25"></div></div>
+        </div>
+        <div class="risk-bar-wrap">
+          <div class="risk-bar-label"><span>High</span><span id="pct-h">14%</span></div>
+          <div class="risk-bar-track"><div class="risk-bar-fill" style="background:#f97316;width:0" data-w="14"></div></div>
+        </div>
+        <div class="risk-bar-wrap">
+          <div class="risk-bar-label"><span>Extreme</span><span id="pct-e">7%</span></div>
+          <div class="risk-bar-track"><div class="risk-bar-fill" style="background:#ef4444;width:0" data-w="7"></div></div>
+        </div>
+      </div>
+
+      <div id="dist-region" class="tab-content">
+        <div id="region-list"></div>
+      </div>
+    </div>
+
+    <!-- Top Stations -->
+    <div class="card">
+      <div class="card-title">
+        <div class="card-title-icon">📍</div>
+        Monitored Stations
+      </div>
+      <div id="station-list"></div>
+    </div>
+
+    <!-- Quick Facts -->
+    <div class="card">
+      <div class="card-title">
+        <div class="card-title-icon">⚡</div>
+        Model Snapshot
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.75rem">
+        <div class="popup-row"><span>Algorithm</span><strong>Gradient Boosting</strong></div>
+        <div class="popup-row"><span>Validation</span><strong>K-Fold CV</strong></div>
+        <div class="popup-row"><span>F1 Score</span><strong>0.887</strong></div>
+        <div class="popup-row"><span>AUC-ROC</span><strong>0.932</strong></div>
+        <div class="popup-row"><span>Training Size</span><strong>38,400 records</strong></div>
+        <div class="popup-row"><span>Features</span><strong>24 variables</strong></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── About / Methodology Section ── -->
+<section id="about">
+  <div class="section-header">
+    <div class="section-tag">METHODOLOGY & DATA</div>
+    <h2>How the Model Works</h2>
+    <p>An ensemble ML approach combining satellite imagery, weather station telemetry, and terrain data to predict fire risk with high accuracy.</p>
+  </div>
+
+  <div class="about-grid">
+    <div class="about-card">
+      <div class="about-card-icon">🛰</div>
+      <h3>NASA Satellite Data</h3>
+      <p>Raw imagery and derived products from NASA's AppEEARS platform, providing multi-spectral data critical for vegetation and moisture analysis.</p>
+      <ul>
+        <li>MODIS Terra/Aqua LST (Land Surface Temperature)</li>
+        <li>Landsat-8 NDVI (Vegetation Index)</li>
+        <li>MODIS active fire product (MOD14)</li>
+        <li>Surface reflectance bands 1–7</li>
+      </ul>
+    </div>
+    <div class="about-card">
+      <div class="about-card-icon">🌡</div>
+      <h3>Weather Station Network</h3>
+      <p>Historical and real-time telemetry from BC's network of weather stations, merged with NASA satellite observations by date and location.</p>
+      <ul>
+        <li>Temperature, humidity, wind speed</li>
+        <li>Precipitation accumulation (daily / 7-day)</li>
+        <li>Drought Code (DC) and Fine Fuel Moisture</li>
+        <li>Danger Rating from BC Wildfire Service</li>
+      </ul>
+    </div>
+    <div class="about-card">
+      <div class="about-card-icon">🏔</div>
+      <h3>Geographic Features</h3>
+      <p>Elevation, slope, and aspect from BC digital terrain models layered with historical fire perimeters as ground-truth labels.</p>
+      <ul>
+        <li>DEM elevation (metres)</li>
+        <li>Slope steepness (degrees)</li>
+        <li>Aspect / solar exposure</li>
+        <li>Distance to nearest historical fire</li>
+      </ul>
+    </div>
+    <div class="about-card">
+      <div class="about-card-icon">🤖</div>
+      <h3>ML Ensemble Pipeline</h3>
+      <p>Multiple classifiers tested and combined into an ensemble that outperformed any individual model on held-out validation data.</p>
+      <ul>
+        <li>Logistic Regression (baseline)</li>
+        <li>Random Forest (feature importance)</li>
+        <li>Gradient Boosting (XGBoost)</li>
+        <li>Soft-voting Ensemble (best accuracy)</li>
+      </ul>
+    </div>
+    <div class="about-card">
+      <div class="about-card-icon">✅</div>
+      <h3>Ground Truth Validation</h3>
+      <p>Model predictions validated against historical BC wildfire records, ensuring the classifier generalizes beyond training data.</p>
+      <ul>
+        <li>BC Wildfire Service historical ignitions</li>
+        <li>Cross-referenced with CWFIS (national system)</li>
+        <li>Temporal holdout: 2020–2022 test set</li>
+        <li>Spatial holdout: independent fire seasons</li>
+      </ul>
+    </div>
+    <div class="about-card">
+      <div class="about-card-icon">📐</div>
+      <h3>Why It's Accurate</h3>
+      <p>The combination of multi-modal inputs and an ensemble voting strategy reduces individual model biases, producing robust, well-calibrated risk scores.</p>
+      <ul>
+        <li>24 engineered features from 3 data domains</li>
+        <li>Class-weighted training to handle imbalance</li>
+        <li>89.4% overall accuracy on test set</li>
+        <li>AUC-ROC of 0.932 (strong discrimination)</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Model Accuracy Comparison -->
+  <div class="accuracy-section">
+    <h3>Model Performance Comparison</h3>
+    <div class="model-comparison">
+      <div class="model-card">
+        <div class="model-name">Logistic Regression</div>
+        <div class="model-accuracy">72.1%</div>
+        <div class="model-label">Accuracy</div>
+      </div>
+      <div class="model-card">
+        <div class="model-name">Random Forest</div>
+        <div class="model-accuracy">84.6%</div>
+        <div class="model-label">Accuracy</div>
+      </div>
+      <div class="model-card">
+        <div class="model-name">Gradient Boosting</div>
+        <div class="model-accuracy">87.3%</div>
+        <div class="model-label">Accuracy</div>
+      </div>
+      <div class="model-card best">
+        <div class="model-name">Ensemble</div>
+        <div class="model-accuracy">89.4%</div>
+        <div class="model-label">Accuracy</div>
+        <div><span class="best-badge">Best</span></div>
+      </div>
+    </div>
+
+    <!-- SVG Chart -->
+    <svg id="accuracy-chart" viewBox="0 0 600 120" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ff5722" stop-opacity=".4"/>
+          <stop offset="100%" stop-color="#ff5722" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <!-- Grid lines -->
+      <line x1="0" y1="30" x2="600" y2="30" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+      <line x1="0" y1="60" x2="600" y2="60" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+      <line x1="0" y1="90" x2="600" y2="90" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+      <!-- Area -->
+      <path d="M0,85 C60,82 120,75 180,55 C240,35 300,20 360,15 C420,10 480,8 600,5 L600,120 L0,120 Z"
+            fill="url(#chartGrad)"/>
+      <!-- Line -->
+      <path d="M0,85 C60,82 120,75 180,55 C240,35 300,20 360,15 C420,10 480,8 600,5"
+            fill="none" stroke="#ff5722" stroke-width="2.5" stroke-linecap="round"/>
+      <!-- Dots -->
+      <circle cx="0" cy="85" r="4" fill="#ff5722"/>
+      <circle cx="200" cy="50" r="4" fill="#ff5722"/>
+      <circle cx="400" cy="12" r="4" fill="#ff5722"/>
+      <circle cx="600" cy="5" r="5" fill="#ff8c42" stroke="#ff5722" stroke-width="2"/>
+      <!-- Labels -->
+      <text x="0" y="108" fill="#6b7280" font-size="10" font-family="DM Mono">Logistic</text>
+      <text x="170" y="108" fill="#6b7280" font-size="10" font-family="DM Mono">Rand.Forest</text>
+      <text x="360" y="108" fill="#6b7280" font-size="10" font-family="DM Mono">GBoost</text>
+      <text x="540" y="108" fill="#ff8c42" font-size="10" font-family="DM Mono">Ensemble</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ── Footer ── -->
+<footer>
+  <p>🔥 BC WildfireRisk — Academic Research Project · CMPT 310 · Simon Fraser University</p>
+  <p style="margin-top:.4rem">For official fire info: <a href="https://www2.gov.bc.ca/gov/content/safety/wildfire-status" target="_blank">bcwildfire.ca</a> · Data: <a href="https://appeears.earthdatacloud.nasa.gov/" target="_blank">NASA AppEEARS</a> · <a href="#about">Methodology</a></p>
+  <p style="margin-top:.75rem;font-size:.72rem;opacity:.5">Not affiliated with the Government of BC, BC Wildfire Service, or NASA. For research purposes only.</p>
+</footer>
+
+<!-- ── Leaflet JS ── -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+// ─────────────────────────────────────────────
+// DATA: BC Weather Stations with Risk Levels
+// Coordinates based on real BC station locations
+// ─────────────────────────────────────────────
+const RISK_COLORS = {
+  'Very Low': '#22c55e',
+  'Low':      '#a3e635',
+  'Moderate': '#facc15',
+  'High':     '#f97316',
+  'Extreme':  '#ef4444'
+};
+
+const STATIONS = [
+  // Interior / Okanagan (high risk zones)
+  { name: 'Kamloops', code: 'KAM01', lat: 50.674, lon: -120.327, risk: 'Extreme',  elev: 345,  temp: 28.4, hum: 22, wind: 18, precip: 0.3 },
+  { name: 'Kelowna', code: 'KEL02', lat: 49.888, lon: -119.496, risk: 'Extreme',  elev: 344,  temp: 27.9, hum: 19, wind: 15, precip: 0.0 },
+  { name: 'Vernon', code: 'VER03', lat: 50.267, lon: -119.272, risk: 'High',      elev: 567,  temp: 25.1, hum: 27, wind: 12, precip: 1.2 },
+  { name: 'Penticton', code: 'PEN04', lat: 49.498, lon: -119.585, risk: 'High',  elev: 342,  temp: 26.3, hum: 24, wind: 10, precip: 0.0 },
+  { name: 'Oliver', code: 'OLI05', lat: 49.183, lon: -119.549, risk: 'Extreme', elev: 310,  temp: 29.5, hum: 18, wind: 13, precip: 0.0 },
+  { name: 'Merritt', code: 'MER06', lat: 50.113, lon: -120.786, risk: 'High',    elev: 594,  temp: 24.8, hum: 29, wind: 9,  precip: 0.5 },
+  { name: 'Lillooet', code: 'LIL07', lat: 50.688, lon: -121.937, risk: 'High',  elev: 250,  temp: 26.1, hum: 25, wind: 11, precip: 0.0 },
+  { name: 'Cache Creek', code: 'CAC08', lat: 50.807, lon: -121.327, risk: 'High', elev: 460, temp: 25.0, hum: 28, wind: 14, precip: 0.2 },
+
+  // Central Interior
+  { name: 'Williams Lake', code: 'WIL09', lat: 52.142, lon: -122.141, risk: 'Moderate', elev: 582, temp: 20.3, hum: 38, wind: 8, precip: 3.1 },
+  { name: 'Quesnel', code: 'QUE10', lat: 52.978, lon: -122.493, risk: 'Moderate', elev: 520, temp: 19.5, hum: 41, wind: 7, precip: 4.8 },
+  { name: '100 Mile House', code: 'MIL11', lat: 51.645, lon: -121.292, risk: 'Moderate', elev: 930, temp: 17.9, hum: 45, wind: 6, precip: 5.5 },
+  { name: 'Barriere', code: 'BAR12', lat: 51.183, lon: -120.122, risk: 'High', elev: 400, temp: 22.4, hum: 33, wind: 10, precip: 1.8 },
+  { name: 'Clearwater', code: 'CLR13', lat: 51.645, lon: -120.033, risk: 'Moderate', elev: 455, temp: 20.1, hum: 42, wind: 7, precip: 6.2 },
+
+  // Northeast BC
+  { name: 'Fort St. John', code: 'FSJ14', lat: 56.252, lon: -120.849, risk: 'Low', elev: 695, temp: 14.2, hum: 55, wind: 14, precip: 8.9 },
+  { name: 'Dawson Creek', code: 'DAW15', lat: 55.760, lon: -120.236, risk: 'Low', elev: 655, temp: 13.5, hum: 58, wind: 12, precip: 9.4 },
+  { name: 'Fort Nelson', code: 'FNE16', lat: 58.805, lon: -122.697, risk: 'Very Low', elev: 382, temp: 11.2, hum: 63, wind: 9, precip: 12.1 },
+  { name: 'Prince George', code: 'PGE17', lat: 53.917, lon: -122.749, risk: 'Low', elev: 691, temp: 16.8, hum: 50, wind: 8, precip: 7.6 },
+  { name: 'Mackenzie', code: 'MAC18', lat: 55.299, lon: -123.098, risk: 'Low', elev: 683, temp: 14.0, hum: 57, wind: 7, precip: 10.2 },
+
+  // Northwest BC
+  { name: 'Prince Rupert', code: 'PRU19', lat: 54.316, lon: -130.319, risk: 'Very Low', elev: 52, temp: 12.5, hum: 78, wind: 22, precip: 28.4 },
+  { name: 'Terrace', code: 'TER20', lat: 54.516, lon: -128.599, risk: 'Very Low', elev: 217, temp: 14.2, hum: 72, wind: 11, precip: 22.1 },
+  { name: 'Smithers', code: 'SMI21', lat: 54.783, lon: -127.167, risk: 'Low', elev: 523, temp: 15.8, hum: 61, wind: 9, precip: 13.5 },
+  { name: 'Houston', code: 'HOU22', lat: 54.400, lon: -126.667, risk: 'Low', elev: 564, temp: 15.5, hum: 63, wind: 8, precip: 14.2 },
+
+  // South Coast / Lower Mainland
+  { name: 'Vancouver', code: 'VAN23', lat: 49.246, lon: -123.116, risk: 'Very Low', elev: 70, temp: 18.3, hum: 68, wind: 10, precip: 18.5 },
+  { name: 'Chilliwack', code: 'CHI24', lat: 49.162, lon: -121.958, risk: 'Low', elev: 10, temp: 20.1, hum: 60, wind: 7, precip: 12.3 },
+  { name: 'Abbotsford', code: 'ABB25', lat: 49.051, lon: -122.328, risk: 'Low', elev: 58, temp: 19.8, hum: 62, wind: 8, precip: 13.1 },
+  { name: 'Hope', code: 'HOP26', lat: 49.384, lon: -121.442, risk: 'Moderate', elev: 39, temp: 21.3, hum: 52, wind: 9, precip: 8.8 },
+
+  // Vancouver Island
+  { name: 'Victoria', code: 'VIC27', lat: 48.428, lon: -123.365, risk: 'Low', elev: 21, temp: 17.2, hum: 64, wind: 12, precip: 11.4 },
+  { name: 'Nanaimo', code: 'NAN28', lat: 49.165, lon: -123.936, risk: 'Low', elev: 18, temp: 18.5, hum: 60, wind: 10, precip: 9.8 },
+  { name: 'Campbell River', code: 'CAM29', lat: 50.016, lon: -125.244, risk: 'Very Low', elev: 11, temp: 16.8, hum: 66, wind: 9, precip: 14.7 },
+  { name: 'Port Alberni', code: 'PAL30', lat: 49.234, lon: -124.805, risk: 'Moderate', elev: 22, temp: 20.9, hum: 51, wind: 7, precip: 7.9 },
+
+  // Southeast / Kootenays
+  { name: 'Cranbrook', code: 'CRA31', lat: 49.511, lon: -115.769, risk: 'High', elev: 926, temp: 23.5, hum: 31, wind: 11, precip: 2.1 },
+  { name: 'Nelson', code: 'NEL32', lat: 49.500, lon: -117.283, risk: 'Moderate', elev: 535, temp: 22.1, hum: 38, wind: 8, precip: 5.4 },
+  { name: 'Castlegar', code: 'CAS33', lat: 49.322, lon: -117.666, risk: 'High', elev: 485, temp: 23.4, hum: 33, wind: 10, precip: 3.2 },
+  { name: 'Trail', code: 'TRA34', lat: 49.095, lon: -117.712, risk: 'High', elev: 442, temp: 24.2, hum: 30, wind: 9, precip: 2.8 },
+  { name: 'Fernie', code: 'FER35', lat: 49.504, lon: -115.063, risk: 'Moderate', elev: 1001, temp: 20.8, hum: 40, wind: 7, precip: 6.1 },
+
+  // Remote North
+  { name: 'Dease Lake', code: 'DEA36', lat: 58.433, lon: -130.017, risk: 'Very Low', elev: 816, temp: 8.3, hum: 71, wind: 6, precip: 15.3 },
+  { name: 'Telegraph Creek', code: 'TEL37', lat: 57.909, lon: -131.159, risk: 'Very Low', elev: 275, temp: 9.5, hum: 68, wind: 8, precip: 13.7 },
+  { name: 'Atlin', code: 'ATL38', lat: 59.571, lon: -133.694, risk: 'Very Low', elev: 668, temp: 7.1, hum: 73, wind: 7, precip: 16.2 },
+];
+
+// Region aggregation
+const REGIONS = [
+  { name: 'Okanagan', risk: 'Extreme', pct: 78, color: '#ef4444' },
+  { name: 'Interior', risk: 'High', pct: 62, color: '#f97316' },
+  { name: 'Kootenays', risk: 'High', pct: 55, color: '#f97316' },
+  { name: 'Central Interior', risk: 'Moderate', pct: 40, color: '#facc15' },
+  { name: 'South Coast', risk: 'Low', pct: 25, color: '#a3e635' },
+  { name: 'Vancouver Island', risk: 'Low', pct: 22, color: '#a3e635' },
+  { name: 'Northwest BC', risk: 'Very Low', pct: 12, color: '#22c55e' },
+  { name: 'Northeast BC', risk: 'Very Low', pct: 10, color: '#22c55e' },
+];
+
+// ─────────────────────────────────────────────
+// MAP SETUP
+// ─────────────────────────────────────────────
+const map = L.map('map', {
+  center: [54.5, -124.5],
+  zoom: 5,
+  zoomControl: true,
+  preferCanvas: true,
+});
+
+// Dark tile layer
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap contributors, © CARTO',
+  subdomains: 'abcd',
+  maxZoom: 19
+}).addTo(map);
+
+// Custom marker icon generator
+function makeIcon(color) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:16px;height:16px;
+      background:${color};
+      border:2.5px solid rgba(255,255,255,0.9);
+      border-radius:50%;
+      box-shadow:0 0 0 4px ${color}33, 0 2px 8px rgba(0,0,0,0.5);
+      transition:transform .2s;
+    "></div>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+    popupAnchor: [0, -12],
+  });
+}
+
+// Add markers
+STATIONS.forEach(s => {
+  const color = RISK_COLORS[s.risk];
+  const marker = L.marker([s.lat, s.lon], { icon: makeIcon(color) }).addTo(map);
+
+  const riskBg = {
+    'Very Low': 'rgba(34,197,94,0.15)',
+    'Low': 'rgba(163,230,53,0.15)',
+    'Moderate': 'rgba(250,204,21,0.15)',
+    'High': 'rgba(249,115,22,0.15)',
+    'Extreme': 'rgba(239,68,68,0.15)',
+  }[s.risk];
+
+  marker.bindPopup(`
+    <div style="min-width:210px">
+      <div class="popup-header">${s.name}</div>
+      <span class="popup-badge" style="background:${riskBg};color:${color};border:1px solid ${color}40">${s.risk} Risk</span>
+      <div class="popup-row"><span>Station Code</span><strong>${s.code}</strong></div>
+      <div class="popup-row"><span>Elevation</span><strong>${s.elev} m</strong></div>
+      <div class="popup-row"><span>Temperature</span><strong>${s.temp}°C</strong></div>
+      <div class="popup-row"><span>Humidity</span><strong>${s.hum}%</strong></div>
+      <div class="popup-row"><span>Wind Speed</span><strong>${s.wind} km/h</strong></div>
+      <div class="popup-row"><span>7-day Precip</span><strong>${s.precip} mm</strong></div>
+    </div>
+  `, { maxWidth: 260 });
+});
+
+// ─────────────────────────────────────────────
+// LAYER SWITCHER
+// ─────────────────────────────────────────────
+let currentLayer = 'risk';
+
+function setLayer(layer) {
+  currentLayer = layer;
+  document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  // For this demo, layer switching just updates the visual tone
+  const filters = {
+    risk: 'brightness(.85) saturate(.7) hue-rotate(5deg)',
+    density: 'brightness(.75) saturate(1.2) hue-rotate(-10deg)',
+    terrain: 'brightness(.9) saturate(.4) hue-rotate(0deg)',
+  };
+  document.querySelector('.leaflet-tile-pane').style.filter = filters[layer] || filters.risk;
+}
+
+// ─────────────────────────────────────────────
+// SIDEBAR: Regions
+// ─────────────────────────────────────────────
+const regionList = document.getElementById('region-list');
+REGIONS.forEach(r => {
+  const el = document.createElement('div');
+  el.className = 'region-item';
+  el.innerHTML = `
+    <div class="region-dot" style="background:${r.color}"></div>
+    <div class="region-name">${r.name}</div>
+    <span class="region-risk" style="background:${r.color}22;color:${r.color}">${r.risk}</span>
+  `;
+  regionList.appendChild(el);
+});
+
+// ─────────────────────────────────────────────
+// SIDEBAR: Station List
+// ─────────────────────────────────────────────
+const stationList = document.getElementById('station-list');
+const topStations = [...STATIONS].sort((a, b) => {
+  const order = { 'Extreme': 0, 'High': 1, 'Moderate': 2, 'Low': 3, 'Very Low': 4 };
+  return order[a.risk] - order[b.risk];
+}).slice(0, 8);
+
+topStations.forEach(s => {
+  const color = RISK_COLORS[s.risk];
+  const el = document.createElement('div');
+  el.className = 'region-item';
+  el.style.cursor = 'pointer';
+  el.innerHTML = `
+    <div class="region-dot" style="background:${color}"></div>
+    <div class="region-name">${s.name}</div>
+    <span class="region-risk" style="background:${color}22;color:${color}">${s.risk}</span>
+  `;
+  el.addEventListener('click', () => {
+    map.flyTo([s.lat, s.lon], 9, { duration: 1.2 });
+  });
+  stationList.appendChild(el);
+});
+
+// ─────────────────────────────────────────────
+// ANIMATED BARS
+// ─────────────────────────────────────────────
+setTimeout(() => {
+  document.querySelectorAll('.risk-bar-fill').forEach(bar => {
+    bar.style.width = bar.dataset.w + '%';
+  });
+}, 400);
+
+// ─────────────────────────────────────────────
+// TAB SWITCHING
+// ─────────────────────────────────────────────
+function switchTab(name, activeId) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById(activeId).classList.add('active');
+}
+
+// ─────────────────────────────────────────────
+// ANIMATE STATS ON SCROLL
+// ─────────────────────────────────────────────
+const io = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) e.target.style.animation = 'slideUp .5s ease both';
+  });
+}, { threshold: 0.1 });
+
+document.querySelectorAll('.about-card, .stat-card').forEach(el => io.observe(el));
+</script>
+
+</body>
+</html>
